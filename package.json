@@ -1,0 +1,34 @@
+{
+  "name": "graphql-authorize",
+  "version": "0.0.0",
+  "description": "Add inline authorization straight into your GraphQl schema to restrict access to certain fields based on your user's rights.",
+  "main": "index.js",
+  "scripts": {
+    "eslint": "eslint index.js --fix",
+    "release": "standard-version",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nicolasdao/graphql-authorize.git"
+  },
+  "keywords": [
+    "graphql",
+    "graphql-serverless",
+    "authorize",
+    "security"
+  ],
+  "author": "Nicolas Dao",
+  "license": "BSD-3-Clause",
+  "bugs": {
+    "url": "https://github.com/nicolasdao/graphql-authorize/issues"
+  },
+  "homepage": "https://github.com/nicolasdao/graphql-authorize#readme",
+  "devDependencies": {
+    "eslint": "^4.18.1",
+    "standard-version": "^4.3.0"
+  },
+  "dependencies": {
+    "graphql-s2s": "^0.11.2"
+  }
+}
