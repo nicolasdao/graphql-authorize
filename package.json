@@ -1,6 +1,6 @@
 {
   "name": "graphql-authorize",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Add inline authorization straight into your GraphQl schema to restrict access to certain fields based on your user's rights.",
   "main": "index.js",
   "scripts": {
