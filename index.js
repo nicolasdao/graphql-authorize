@@ -18,7 +18,7 @@ const getAppConfig = () => fs.existsSync(CONFIGPATH) ? require(CONFIGPATH) : {}
 const PARAMS_PROP_NAME = (getAppConfig().params || {}).propName || 'params'
 
 const setError = (res, err, code=500) => 
-	res.status(code).send({ errors: [{ message: `${err.message}\n${err.stack}`, locations: err.locations, path: err.path }] })
+	res.status(code).send({ errors: [{ message: `${err.message}${err.stack ? `\n${err.stack}` : ''}`, locations: err.locations, path: err.path }] })
 
 const createGraphQlWarning = (paths=[]) => paths.length == 0 ? null : [{
 	message: 'Access denied for certain fields. The current response is incomplete.',
@@ -70,7 +70,7 @@ const graphqlAuthenticate = (schemaAST, authenticate, options={}) => {
 		({err, user}) => {
 			// 1. STRICT ACCESS - If there is no partial access, the user must be authenticated to access anything.
 			if (!partialAccess && (err || !user))
-				setError(res, new Error('Access denied.'), 403)
+				setError(res, { message: 'Access denied.' }, 403)
 			// 2. PARTIAL ACCESS - If partial access is on, then the user might still be able to access some parts of the API.
 			else {
 				let query, limitedAccessAST, warnings, accessCompletelyDenied, transform
@@ -103,7 +103,7 @@ const graphqlAuthenticate = (schemaAST, authenticate, options={}) => {
 									transform = nullifyUnauthorizedFields(restrictedPaths)
 								accessCompletelyDenied = !partialAccess
 								if (accessCompletelyDenied)
-									setError(res, new Error('Access denied.'), 403)
+									setError(res, { message: 'Access denied.' }, 403)
 							}
 							// 2.2.1.3. Otherwise, the user has full access to the current query, so no need to filter anything.
 							else

@@ -1,9 +1,67 @@
 # graphql-authorize &middot;  [![NPM](https://img.shields.io/npm/v/graphql-authorize.svg?style=flat)](https://www.npmjs.com/package/graphql-authorize) [![License](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause) [![Neap](https://neap.co/img/made_by_neap.svg)](#this-is-what-we-re-up-to)
-Authorization middleware for [_graphql-serverless_](https://github.com/nicolasdao/graphql-serverless). Add inline authorization straight into the GraphQl schema to restrict access to certain fields based on the user's rights. 
+Authorization middleware for [_graphql-serverless_](https://github.com/nicolasdao/graphql-serverless). Add inline authorization straight into the GraphQl schema to restrict access to certain fields based on the user's rights. __*graphql-serverless*__ allows to deploy [GraphQL](http://graphql.org/learn/) apis (including an optional [GraphiQL interface](https://github.com/graphql/graphiql)) to the most popular serverless platforms:
+- [Zeit Now](https://zeit.co/now) (using express under the hood)
+- [Google Cloud Functions](https://cloud.google.com/functions/) (incl. Firebase Function)
+- [AWS Lambdas](https://aws.amazon.com/lambda)
+- [Azure Functions](https://azure.microsoft.com/en-us/services/functions/) (COMING SOON...)
+
+Decorate your fields with something similar to this in your GraphQl schema:
+```js
+type Product {
+  id: ID!
+  @auth
+  name: String!
+  shortDescription: String
+}
+```
+
+Then define a rule similar to this one:
+```js
+{
+  authenticationFields: field => field.metadata && field.metadata.name == 'auth'
+}
+```
+
+If the user is not authenticated (more about this below), then a GraphQl query similar to this:
+```js
+{
+  products(id:2) {
+    id
+    name
+  }
+}
+```
+
+will return an HTTP response with status 200 similar to this:
+```js
+{
+  "data": {
+    "products": [
+      {
+        "id": "2"
+      }
+    ]
+  },
+  "warnings": [
+    {
+      "message": "Access denied for certain fields. The current response is incomplete.",
+      "path": [
+        "products.name"
+      ]
+    }
+  ]
+}
+```
+
+> TIP - It is also possible to configure the middleware to nullify the `name` field rather than omitting it (refer to section [Returning `null` Rather Than Removing Fields](#returning-null-rather-than-removing-fields)). This is usually rather important client libraries using caching like the [apollo-client](https://github.com/apollographql/apollo-client) which would break otherwise.
 
 # Table Of Contents
 > * [Install](#install)
 > * [How To Use It](#how-to-use-it)
+> 	- [Basics](#basics)
+> 	- [Managing Authorizations](#managing-authorizations)
+>	- [Returning `null` Rather Than Removing Fields](#returning-null-rather-than-removing-fields)
+>	- [Not Returning Partial Response](#not-returning-partial-response)
 
 # Install
 ### node
@@ -12,594 +70,272 @@ npm install graphql-authorize --save
 ```
 
 # How To Use It
-```js
-const { transpileSchema } = require('graphql-authorize')
-const { makeExecutableSchema } = require('graphql-tools')
-
-const schema = `
-type Node {
-	id: ID!
-}
-
-type Person inherits Node {
-	firstname: String
-	lastname: String
-}
-
-type Student inherits Person {
-	nickname: String
-}
-
-type Query {
-  students: [Student]
-}
-`
-
-const resolver = {
-        Query: {
-            students(root, args, context) {
-            	// replace this dummy code with your own logic to extract students.
-                return [{ id: 1, firstname: "Carry", lastname: "Connor", nickname: "Cannie" }]
-            }
-        }
-    };
-
-const executableSchema = makeExecutableSchema({
-  typeDefs: [transpileSchema(schema)],
-  resolvers: resolver
-})
-```
-
-[**Type Inheritance**](#type-inheritance)
-```js
-const schema = `
-type Node {
-	id: ID!
-}
-
-# Inheriting from the 'Node' type
-type Person inherits Node {
-	firstname: String
-	lastname: String
-}
-
-# Inheriting from the 'Person' type
-type Student inherits Person {
-	nickname: String
-}
-`
-```
-
-More details in the [code below](#type-inheritance).
-
-[**Generic Types**](#generic-types)
-```js
-const schema = `
-# Defining a generic type
-type Paged<T> {
-	data: [T]
-	cursor: ID
-}
-
-type Question {
-	name: String!
-	text: String!
-}
-
-# Using the generic type
-type Student {
-	name: String
-	questions: Paged<Question>
-}
-
-# Using the generic type
-type Teacher {
-	name: String
-	students: Paged<Student>
-}
-`
-```
-
-More details in the [code below](#generic-types).
-
-[**Metadata Decoration**](#metadata-decoration)
-```js
-const schema = `
-# Defining a custom 'node' metadata attribute
-@node
-type Node {
-	id: ID!
-}
-
-type Student inherits Node {
-	name: String
-
-	# Defining another custom 'edge' metadata, and supporting a generic type
-	@edge(some other metadata using whatever syntax I want)
-	questions: [String]
-}
-`
-```
-
-The enriched schema provides a richer and more compact notation. The transpiler converts the enriched schema into the standard expected by [graphql.js](https://github.com/graphql/graphql-js) (using the _buildSchema_ method) as well as the [Apollo Server](https://github.com/apollographql/graphql-tools). For more details on how to extract those extra information from the string schema, use the method _getSchemaAST_ (example in section [_Metadata Decoration_](#metadata-decoration)). 
-
-_Metadata_ can be added to decorate the schema types and properties. Add whatever you want as long as it starts with _@_ and start hacking your schema. The original intent of that feature was to decorate the schema with metadata _@node_ and _@edge_ so we could add metadata about the nature of the relations between types.
-
-[**Deconstructing - Transforming - Rebuilding Queries**](#deconstructing---transforming---rebuilding-queries)
-
-This feature allows your GraphQl server to deconstruct any GraphQl query as an AST that can then be filtered and modified based on your requirements. That AST can then be rebuilt as a valid GraphQL query. A great example of that feature in action is the [__graphql-authorize__](https://github.com/nicolasdao/graphql-authorize.git) middleware for [__graphql-serverless__](https://github.com/nicolasdao/graphql-serverless) which filters query's properties based on the user's rights.
-
-For a concrete example, refer to the [code below](#deconstructing-transforming-rebuilding-queries).
-
-# Examples
-_WARNING: the following examples will be based on '[graphql-tools](https://github.com/apollographql/graphql-tools)' from the Apollo team, but the string schema could also be used with the 'buildSchema' method from graphql.js_
-
-### Type Inheritance
-_NOTE: The examples below only use 'type', but it would also work on 'input'_
-
-__*Before graphql-s2s*__
-```js
-const schema = `
-type Teacher {
-	id: ID!
-	creationDate: String
-
-	firstname: String!
-	middlename: String
-	lastname: String!
-	age: Int!
-	gender: String 
-
-	title: String!
-}
-
-type Student {
-	id: ID!
-	creationDate: String
-
-	firstname: String!
-	middlename: String
-	lastname: String!
-	age: Int!
-	gender: String 
-
-	nickname: String!
-}`
-
-```
-__*After graphql-s2s*__
-```js
-const schema = `
-type Node {
-	id: ID!
-	creationDate: String
-}
-
-type Person inherits Node {
-	firstname: String!
-	middlename: String
-	lastname: String!
-	age: Int!
-	gender: String 
-}
-
-type Teacher inherits Person {
-	title: String!
-}
-
-type Student inherits Person {
-	nickname: String!
-}`
-
-```
-
-__*Full code example*__
-
-```js
-const { transpileSchema } = require('graphql-s2s').graphqls2s
-const { makeExecutableSchema } = require('graphql-tools')
-const { students, teachers } = require('./dummydata.json')
-
-const schema = `
-type Node {
-	id: ID!
-	creationDate: String
-}
-
-type Person inherits Node {
-	firstname: String!
-	middlename: String
-	lastname: String!
-	age: Int!
-	gender: String 
-}
-
-type Teacher inherits Person {
-	title: String!
-}
-
-type Student inherits Person {
-	nickname: String!
-	questions: [Question]
-}
-
-type Question inherits Node {
-	name: String!
-	text: String!
-}
-
-type Query {
-  # ### GET all users
-  #
-  students: [Student]
-
-  # ### GET all teachers
-  #
-  teachers: [Teacher]
-}
-`
-
-const resolver = {
-        Query: {
-            students(root, args, context) {
-                return Promise.resolve(students)
-            },
-
-            teachers(root, args, context) {
-                return Promise.resolve(teachers)
-            }
-        }
-    }
-
-const executableSchema = makeExecutableSchema({
-  typeDefs: [transpileSchema(schema)],
-  resolvers: resolver
-})
-```
-
-### Generic Types
-_NOTE: The examples below only use 'type', but it would also work on 'input'_
-
-__*Before graphql-s2s*__
-```js
-const schema = `
-type Teacher {
-	id: ID!
-	creationDate: String
-	firstname: String!
-	middlename: String
-	lastname: String!
-	age: Int!
-	gender: String 
-	title: String!
-}
-
-type Student {
-	id: ID!
-	creationDate: String
-	firstname: String!
-	middlename: String
-	lastname: String!
-	age: Int!
-	gender: String 
-	nickname: String!
-	questions: Questions
-}
-
-type Question {
-	id: ID!
-	creationDate: String
-	name: String!
-	text: String!
-}
-
-type Teachers {
-	data: [Teacher]
-	cursor: ID
-}
-
-type Students {
-	data: [Student]
-	cursor: ID
-}
-
-type Questions {
-	data: [Question]
-	cursor: ID
-}
-
-type Query {
-  # ### GET all users
-  #
-  students: Students
-
-  # ### GET all teachers
-  #
-  teachers: Teachers
-}
-`
-
-```
-__*After graphql-s2s*__
-```js
-const schema = `
-type Paged<T> {
-	data: [T]
-	cursor: ID
-}
-
-type Node {
-	id: ID!
-	creationDate: String
-}
-
-type Person inherits Node {
-	firstname: String!
-	middlename: String
-	lastname: String!
-	age: Int!
-	gender: String 
-}
-
-type Teacher inherits Person {
-	title: String!
-}
-
-type Student inherits Person {
-	nickname: String!
-	questions: Paged<Question>
-}
-
-type Question inherits Node {
-	name: String!
-	text: String!
-}
-
-type Query {
-  # ### GET all users
-  #
-  students: Paged<Student>
-
-  # ### GET all teachers
-  #
-  teachers: Paged<Teacher>
-}
-`
-```
-This is very similar to C# or Java generic classes. What the transpiler will do is to simply recreate 3 types (one for Paged\<Question\>, Paged\<Student\> and Paged\<Teacher\>). If we take the Paged\<Question\> example, the transpiled type will be:
-```js
-type PagedQuestion {
-	data: [Question]
-	cursor: ID
-}
-```
-
-__*Full code example*__
-
-```js
-const { transpileSchema } = require('graphql-s2s').graphqls2s
-const { makeExecutableSchema } = require('graphql-tools')
-const { students, teachers } = require('./dummydata.json')
-
-const schema = `
-type Paged<T> {
-	data: [T]
-	cursor: ID
-}
-
-type Node {
-	id: ID!
-	creationDate: String
-}
-
-type Person inherits Node {
-	firstname: String!
-	middlename: String
-	lastname: String!
-	age: Int!
-	gender: String 
-}
-
-type Teacher inherits Person {
-	title: String!
-}
-
-type Student inherits Person {
-	nickname: String!
-	questions: Paged<Question>
-}
-
-type Question inherits Node {
-	name: String!
-	text: String!
-}
-
-type Query {
-  # ### GET all users
-  #
-  students: Paged<Student>
-
-  # ### GET all teachers
-  #
-  teachers: Paged<Teacher>
-}
-`
-
-const resolver = {
-        Query: {
-            students(root, args, context) {
-                return Promise.resolve({ data: students.map(s => ({ __proto__:s, questions: { data: s.questions, cursor: null }})), cursor: null })
-            },
-
-            teachers(root, args, context) {
-                return Promise.resolve({ data: teachers, cursor: null });
-            }
-        }
-    }
-
-const executableSchema = makeExecutableSchema({
-  typeDefs: [transpileSchema(schema)],
-  resolvers: resolver
-})
-```
-
-### Metadata Decoration
-Define your own custom metadata and decorate your GraphQL schema with new types of data. Let's imagine we want to explicitely add metadata about the type of relations between nodes, we could write something like this:
-```js
-const { getSchemaAST } = require('graphql-s2s').graphqls2s
-const schema = `
-@node
-type User {
-	@edge('<-[CREATEDBY]-')
-	posts: [Post]
-}
-`
-
-const schemaObjects = getSchemaAST(schema);
-
-// -> schemaObjects
-//	{ 
-//		"type": "TYPE", 
-//		"name": "User", 
-//		"metadata": { 
-//			"name": "node", 
-//			"body": "", 
-//			"schemaType": "TYPE", 
-//			"schemaName": "User", "parent": null 
-//		}, 
-//		"genericType": null, 
-//		"blockProps": [{ 
-//			"comments": "", 
-//			"details": { 
-//				"name": "posts", 
-//				"metadata": { 
-//					"name": "edge", 
-//					"body": "(\'<-[CREATEDBY]-\')", 
-//					"schemaType": "PROPERTY", 
-//					"schemaName": "posts: [Post]", 
-//					"parent": { 
-//						"type": "TYPE", 
-//						"name": "User", 
-//						"metadata": { 
-//							"type": "TYPE", 
-//							"name": "node" 
-//						} 
-//					} 
-//				}, 
-//				"params": null, 
-//				"result": { 
-//					"originName": "[Post]", 
-//					"isGen": false, 
-//					"name": "[Post]" 
-//				} 
-//			}, 
-//			"value": "posts: [Post]" 
-//		}], 
-//		"inherits": null, 
-//		"implements": null 
-//	}
-```
-### Deconstructing - Transforming - Rebuilding Queries
-This feature allows your GraphQl server to deconstruct any GraphQl query as an AST that can then be filtered and modified based on your requirements. That AST can then be rebuilt as a valid GraphQL query. A great example of that feature in action is the [__graphql-authorize__](https://github.com/nicolasdao/graphql-authorize.git) middleware for [__graphql-serverless__](https://github.com/nicolasdao/graphql-serverless) which filters query's properties based on the user's rights.
-
-```js
-const { getQueryAST, buildQuery, getSchemaAST } = require('graphql-s2s').graphqls2s
-const schema = `
-	type Property {
-		name: String
+## Basics
+An example will worth a thousand words. Follow those steps:
+1. Create a new npm project: `npm init`
+2. Install the following packages: `npm install graphql-s2s graphql-serverless graphql-authorize webfunc lodash --save` 
+3. Create a new `index.js` as follow:
+
+	```js
+	const graphqlAuth = require('graphql-authorize')
+	const { getSchemaAST, transpileSchema } = require('graphql-s2s').graphqls2s
+	const { graphqlHandler } = require('graphql-serverless')
+	const { app } = require('webfunc')
+	const { makeExecutableSchema } = require('graphql-tools')
+	const _ = require('lodash')
+
+	// STEP 1. Mock some data for this demo.
+	const productMocks = [
+		{ id: 1, name: 'Product A', shortDescription: 'First product.', owner: 'Marc Stratfield' }, 
+		{ id: 2, name: 'Product B', shortDescription: 'Second product.', owner: 'Nic Dao' }]
+
+	const variantMocks = [
+		{ id: 1, name: 'Variant A', shortDescription: 'First variant.' }, 
+		{ id: 2, name: 'Variant B', shortDescription: 'Second variant.' }]
+
+	// STEP 2. Creating a basic GraphQl Schema augmented with some non-standard authorizaion metadata
+	//         thanks to the 'graphql-s2s' package (https://github.com/nicolasdao/graphql-s2s). 
+	const schema = `
+	type Product {
+		id: ID!
 		@auth
-		address: String
+		name: String!
+		shortDescription: String
+		owner: String
 	}
-	
-	input InputWhere {
-		name: String
-		locations: [LocationInput]
+	type Variant {
+		id: ID!
+		name: String!
+		shortDescription: String
 	}
-	
-	input LocationInput {
-		type: String 
-		value: String
-	}
-	
 	type Query {
-		properties(where: InputWhere): [Property]
-	}`
+		products(id: Int): [Product]
+		variants(id: Int): [Variant]
+	}
+	`
 
-const query = `
-	query {
-		properties(where: { name: "Love", locations: [{ type: "house", value: "Bellevue hill" }] }){
-			name
-			address
+	const productResolver = {
+		Query: {
+			products(root, { id }, context) {
+				const results = id ? productMocks.filter(p => p.id == id) : productMocks
+				if (results.length > 0)
+					return results
+				else
+					throw new Error(`Product with id ${id} does not exist.`)
+			}
 		}
-	}`
+	}
 
-const schemaAST = getSchemaAST(schema)
-const queryAST = getQueryAST(query, null, schemaAST)
-const rebuiltQuery = buildQuery(queryAST.filter(x => !x.metadata || x.metadata.name != 'auth'))
+	const variantResolver = {
+		Query: {
+			variants(root, { id }, context) {
+				const results = id ? variantMocks.filter(p => p.id == id) : variantMocks
+				if (results.length > 0)
+					return results
+				else
+					throw new Error(`Variant with id ${id} does not exist.`)
+			}
+		}
+	}
 
-//	query {
-//		properties(where:{name:"Love",locations:[{type:"house",value:"Bellevue hill"}]}){
-//			name
-//		}
-// 	}
+	// STEP 3. Transpiling our schema on steroid to a standard schema using the 'transpileSchema'
+	//         function from the 'graphql-s2s' package (https://github.com/nicolasdao/graphql-s2s). 
+	const executableSchema = makeExecutableSchema({
+		typeDefs: transpileSchema(schema),
+		resolvers: _.merge(productResolver, variantResolver) 
+	})
+
+	// STEP 4. Creating the Express-like middleware that will define the authorization rules that will give
+	//         access or not to certain fields.
+	const schemaAST = getSchemaAST(schema)
+	const authorize = graphqlAuth(
+		// AST of the Graphql schema augmented with metadata
+		schemaAST, 
+		// Function that must terminate by a call to the 'next' callback with 2 required arguments:
+		// @param  {Object} err   Potential error object useful for identifying the source of the 
+		//                        authentication failure.
+		// @param  {Object} user  If this object exists, then the authentication based on data contained 
+		//                        in the 'req' object is successfull, otherwise it is not.
+		(req, res, next) => {
+			// This example below simulates a situation where all request will always be
+			// unauthenticated.
+			const err = null
+			const user = null
+			next(err, user)
+		}, 
+		// Defines the authentication rules, i.e. the rule on each field that determines
+		// whether that field requires authentication.
+		{
+			authenticationFields: field => field.metadata && field.metadata.name.indexOf('auth') == 0
+		})
+
+	// STEP 5. Creating a GraphQL and a GraphiQl endpoint
+	const graphqlOptions = {
+		schema: executableSchema,
+		graphiql: {
+			endpoint: '/graphiql'
+		}
+	}
+
+	app.all(['/', '/graphiql'], authorize, graphqlHandler(graphqlOptions))
+
+	// STEP 5. Starting the server 
+	app.listen(4000)
+	```
+
+4. Run `node index.js`
+5. Browse to [`http://localhost:4000/graphiql`](http://localhost:4000/graphiql)
+6. Execute a query similar to this in graphiql:
+	```js
+	{
+	  products(id:2) {
+	    id
+	      name
+	  }
+	}
+	```
+
+	Because we've hardcoded that all requests are unauthenticated (ref. STEP 4. `user = null`), this request above will yield the following result HTTP 200 response:
+
+	```js
+	{
+	  "data": {
+	    "products": [
+	      {
+	        "id": "2"
+	      }
+	    ]
+	  },
+	  "warnings": [
+	    {
+	      "message": "Access denied for certain fields. The current response is incomplete.",
+	      "path": [
+	        "products.name"
+	      ]
+	    }
+	  ]
+	}
+	```
+
+> NOTICE that you're not forced to use the metadata `@auth` to defined what field is restricted to authenticated user. You can do what ever you want. We just thought it made sense based on our own experience.
+
+> TIP - It is also possible to configure the middleware to nullify the `name` field rather than omitting it (refer to section [Returning `null` Rather Than Removing Fields](#returning-null-rather-than-removing-fields)). This is usually rather important client libraries using caching like the [apollo-client](https://github.com/apollographql/apollo-client) which would break otherwise.
+
+## Managing Authorizations
+
+In the previous example, we introduced how to restrict access to unauthenticated users. Now we'll see how we can restrict access based on roles of authenticated users. 
+
+In STEP 2, updates the schema as follow:
+```js
+type Product {
+  id: ID!
+  @auth
+  name: String!
+  shortDescription: String
+  @auth(admin)
+  owner: String
+}
 ```
 
-Notice that the original query was requesting the `address` property. Because we decorated that property with the custom metadata `@auth` (feature demonstrated previously [Metadata Decoration](#metadata-decoration)), we were able to filter that property to then rebuilt the query without it.
-
-#### API
-
-__*getQueryAST(query, operationName, schemaAST, options): QueryAST*__
-
-Returns an GraphQl query AST.
-
-| Arguments      | type    | Description  |
-| :------------- |:-------:| :------------ |
-| query      	 | String  | GraphQl Query. |
-| operationName  | String  | GraphQl query operation. Only useful if multiple operations are defined in a single query, otherwise use `null`. |
-| schemaAST      | Object  | Original GraphQl schema AST obtained thanks to the `getSchemaAST` function. |
-| options.defrag | Boolean | If set to true and if the query contained fragments, then all fragments are replaced by their explicit definition in the AST. |
-
-__*QueryAST Object Structure*__
-
-| Properties | type   | Description  |
-| :--------- |:------:| :------------ |
-| name    	 | String | Field's name. |
-| kind       | String | Field's kind. |
-| type       | String | Field's type. |
-| metadata   | String | Field's metadata. |
-| args       | Array  | Array of argument objects. |
-| properties | Array  | Array of QueryAST objects. |
-
-__*QueryAST.filter((ast:QueryAST) => ...): QueryAST*__
-
-Returns a new QueryAST object where only ASTs complying to the predicate `ast => ...` are left.
-
-__*QueryAST.propertyPaths((ast:QueryAST) => ...): [String]*__
-
-Returns an array of strings. Each one represents the path to the query property that matches the predicate `ast => ...`.
-
-__*QueryAST.some((ast:QueryAST) => ...): Boolean*__
-
-Returns a boolean indicating whether the QueryAST contains at least one AST matching the predicate `ast => ...`.
-
-__*buildQuery(QueryAST): String*__
-
-Rebuilds a valid GraphQl query from a QueryAST object.
-
-# Contribute
-This project is built using Javascript ES6. Each version is also transpiled to ES5 using Babel through Webpack 2, so this project can run in the browser. In order to write unit test only once instead of duplicating it for each version of Javascript, the all unit tests have been written using Javascript ES5 in mocha. That means that if you want to test the project after some changes, you will need to first transpile the project to ES5. This can be done simply by running the following command:
-
-```
-npm run dev
-npm test
+In STEP 4, update the code as follow:
+```js
+const authorize = graphqlAuth(
+  schemaAST, 
+  (req, res, next) => {
+    const err = null
+    const user = { role: 'standard' }
+    next(err, user)
+  }, 
+  {
+    authenticationFields: field => field.metadata && field.metadata.name.indexOf('auth') == 0,
+    authorizationFields: (field, user) => 
+       field.metadata && 
+       ((field.metadata.name == 'auth' && !field.metadata.body) || field.metadata.name == 'auth' && field.metadata.body == `(${user.role})`)
+  })
 ```
 
-If you want to test the code without transpiling it, I've added a variant:
+The code above restricts the access to the `Product.owner` field to user with an `admin` role. For the sake of this demo, all requests are now being hardcoded so that the user is authenticated (i.e. the `user` object exists) and its role is `standard`. 
 
+The following request:
+```js
+{
+  products(id:2) {
+    id
+    name
+    owner
+  }
+}
 ```
-npm run test:dev
+
+will now return:
+```js
+{
+  "data": {
+    "products": [
+      {
+        "id": "2",
+        "name": "Product B"
+      }
+    ]
+  },
+  "warnings": [
+    {
+      "message": "Access denied for certain fields. The current response is incomplete.",
+      "path": [
+        "products.owner"
+      ]
+    }
+  ]
+}
 ```
-This sets an environment variable that configure the project to load the main dependency from the _src_ folder (source code in ES6) instead of the _lib_ folder (transpiled ES5 code). 
+
+As you can see, now that the request is authenticated, the `name` field is accessible, but because the user's role is `standard` rather tha admin, the `owner` property is not accessible.
+
+Update the role above to `admin` and see what happens.
+
+## Returning `null` Rather Than Removing Fields
+
+The previous examples have demonstrated fields not being returned when the request is either not authenticated or lacking the adequate rights. However, this behavior might break some client libraries like the [apollo-client](https://github.com/apollographql/apollo-client) which expect the schema of the response to conform to the request schema. To allow support for such use cases, it is possible to nullify fields rather than removing them, thanks to the `nullifyUnauthorizedFields` property:
+
+```js
+const authorize = graphqlAuth(
+  schemaAST, 
+  (req, res, next) => {
+    const err = null
+    const user = { role: 'standard' }
+    next(err, user)
+  }, 
+  {
+    authenticationFields: field => field.metadata && field.metadata.name.indexOf('auth') == 0,
+    authorizationFields: (field, user) => 
+       field.metadata && 
+       ((field.metadata.name == 'auth' && !field.metadata.body) || field.metadata.name == 'auth' && field.metadata.body == `(${user.role})`),
+       nullifyUnauthorizedFields: true
+  })
+```
+
+## Not Returning Partial Response
+
+So far, all previous examples have demonstrated partial response being returned in case of missing authentication or missing rights. However, one other desired behavior could to fail completely with an HTTP 403 forbidden. This can be done using the `partialAccess` property.
+
+```js
+const authorize = graphqlAuth(
+  schemaAST, 
+  (req, res, next) => {
+    const err = null
+    const user = { role: 'standard' }
+    next(err, user)
+  }, 
+  {
+    authenticationFields: field => field.metadata && field.metadata.name.indexOf('auth') == 0,
+    authorizationFields: (field, user) => 
+       field.metadata && 
+       ((field.metadata.name == 'auth' && !field.metadata.body) || field.metadata.name == 'auth' && field.metadata.body == `(${user.role})`),
+       nullifyUnauthorizedFields: true,
+       partialAccess: false
+  })
+```
+
 
 # This Is What We re Up To
 We are Neap, an Australian Technology consultancy powering the startup ecosystem in Sydney. We simply love building Tech and also meeting new people, so don't hesitate to connect with us at [https://neap.co](https://neap.co).
